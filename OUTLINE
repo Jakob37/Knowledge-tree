@@ -1,0 +1,17 @@
+The idea with this app is to make it convenient to collect new information and also make it accessible to activate the knowledge.
+
+All information belongs in a tree.
+
+New nodes "leaves" can be added at any point to this tree.
+
+Any node can be viewed as a markdown like view (i.e. headers and contents and optionally bullet point lists).
+
+Any node can be selected to be part of a flash card system. This flash card system should be able to remember previous interactions
+in a way similar to anki flashcards. Allowing saying "easy" bumping the card further into the future, or "forgot" to restart it etc.
+
+Cards should neatly display whether they are flashcards.
+
+The overall layout and drag and drop system should follow the one used in mind, but focusing on this idea in particular. I.e. no projects,
+project stacking etc. Only one view where nodes / leaves can be added.
+
+It needs to be easy to rearrange leaves across abstraction levels, i.e. by allowing expanding the sub tree and then drag and drop across.
