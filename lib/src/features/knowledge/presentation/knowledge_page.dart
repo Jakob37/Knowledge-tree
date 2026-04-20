@@ -15,7 +15,8 @@ class KnowledgePage extends StatefulWidget {
   State<KnowledgePage> createState() => _KnowledgePageState();
 }
 
-class _KnowledgePageState extends State<KnowledgePage> {
+class _KnowledgePageState extends State<KnowledgePage>
+    with SingleTickerProviderStateMixin {
   final KnowledgeStorage _storage = const KnowledgeStorage();
   final KnowledgeBackupService _backupService = const KnowledgeBackupService();
   final KnowledgeBackupPreferences _backupPreferences =
@@ -27,11 +28,33 @@ class _KnowledgePageState extends State<KnowledgePage> {
   bool _autosavePaused = false;
   String? _selectedNodeId;
   String? _statusMessage;
+  late final TabController _tabController;
+  int _currentTabIndex = 0;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this)
+      ..addListener(_handleTabChanged);
     _loadBoard();
+  }
+
+  @override
+  void dispose() {
+    _tabController
+      ..removeListener(_handleTabChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _handleTabChanged() {
+    if (_tabController.indexIsChanging ||
+        _currentTabIndex == _tabController.index) {
+      return;
+    }
+    setState(() {
+      _currentTabIndex = _tabController.index;
+    });
   }
 
   Future<void> _loadBoard() async {
@@ -68,23 +91,36 @@ class _KnowledgePageState extends State<KnowledgePage> {
 
     final List<VisibleKnowledgeNode> visibleNodes = _visibleNodes();
     final int flashcardCount = _countFlashcards(_board.roots);
-    final int dueFlashcardCount = _collectDueFlashcards(_board.roots).length;
+    final List<KnowledgeNode> dueFlashcards = _collectDueFlashcards(
+      _board.roots,
+    );
+    final List<KnowledgeNode> scheduledFlashcards = _collectScheduledFlashcards(
+      _board.roots,
+    );
+    final int dueFlashcardCount = dueFlashcards.length;
     final KnowledgeNode? selectedNode = _selectedNode();
-    final bool isWide = MediaQuery.sizeOf(context).width >= 900;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Knowledge'),
-        actions: <Widget>[
-          IconButton(
-            tooltip: 'Review flashcards',
-            onPressed: dueFlashcardCount == 0 ? null : _startReview,
-            icon: Badge.count(
-              count: dueFlashcardCount,
-              isLabelVisible: dueFlashcardCount > 0,
-              child: const Icon(Icons.style_outlined),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: <Tab>[
+            const Tab(
+              text: 'Knowledge',
+              icon: Icon(Icons.account_tree_outlined),
             ),
-          ),
+            Tab(
+              text: 'Flashcards',
+              icon: Badge.count(
+                count: dueFlashcardCount,
+                isLabelVisible: dueFlashcardCount > 0,
+                child: const Icon(Icons.style_outlined),
+              ),
+            ),
+          ],
+        ),
+        actions: <Widget>[
           IconButton(
             tooltip: 'Settings',
             onPressed: _openSettings,
@@ -92,11 +128,19 @@ class _KnowledgePageState extends State<KnowledgePage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openNodeEditor(parentId: _selectedNodeId),
-        icon: const Icon(Icons.add),
-        label: Text(_selectedNodeId == null ? 'Add root' : 'Add child'),
-      ),
+      floatingActionButton: _currentTabIndex == 0
+          ? FloatingActionButton.extended(
+              onPressed: () => _openNodeEditor(parentId: _selectedNodeId),
+              icon: const Icon(Icons.add),
+              label: Text(_selectedNodeId == null ? 'Add root' : 'Add child'),
+            )
+          : dueFlashcardCount > 0
+          ? FloatingActionButton.extended(
+              onPressed: _startReview,
+              icon: const Icon(Icons.auto_stories_outlined),
+              label: Text('Review $dueFlashcardCount due'),
+            )
+          : null,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -118,37 +162,177 @@ class _KnowledgePageState extends State<KnowledgePage> {
               ),
               const SizedBox(height: 16),
               Expanded(
-                child: isWide
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
-                          Expanded(
-                            flex: 7,
-                            child: _buildTreePane(visibleNodes),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            flex: 5,
-                            child: _buildDetailPane(selectedNode),
-                          ),
-                        ],
-                      )
-                    : Column(
-                        children: <Widget>[
-                          Expanded(
-                            flex: 6,
-                            child: _buildTreePane(visibleNodes),
-                          ),
-                          const SizedBox(height: 16),
-                          Expanded(
-                            flex: 5,
-                            child: _buildDetailPane(selectedNode),
-                          ),
-                        ],
-                      ),
+                child: TabBarView(
+                  controller: _tabController,
+                  children: <Widget>[
+                    _buildKnowledgeTab(visibleNodes, selectedNode),
+                    _buildFlashcardsTab(
+                      dueFlashcards: dueFlashcards,
+                      scheduledFlashcards: scheduledFlashcards,
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildKnowledgeTab(
+    List<VisibleKnowledgeNode> visibleNodes,
+    KnowledgeNode? selectedNode,
+  ) {
+    final bool isWide = MediaQuery.sizeOf(context).width >= 980;
+    return isWide
+        ? Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Expanded(flex: 7, child: _buildTreePane(visibleNodes)),
+              const SizedBox(width: 16),
+              Expanded(flex: 5, child: _buildDetailPane(selectedNode)),
+            ],
+          )
+        : Column(
+            children: <Widget>[
+              Expanded(flex: 6, child: _buildTreePane(visibleNodes)),
+              const SizedBox(height: 16),
+              Expanded(flex: 5, child: _buildDetailPane(selectedNode)),
+            ],
+          );
+  }
+
+  Widget _buildFlashcardsTab({
+    required List<KnowledgeNode> dueFlashcards,
+    required List<KnowledgeNode> scheduledFlashcards,
+  }) {
+    return ListView(
+      children: <Widget>[
+        _buildReviewHero(dueFlashcards.length),
+        const SizedBox(height: 16),
+        _buildFlashcardSection(
+          title: 'Due now',
+          subtitle: dueFlashcards.isEmpty
+              ? 'No cards are waiting.'
+              : 'Cards ready for active recall right now.',
+          emptyMessage:
+              'You are caught up. New flashcards will appear here when they become due.',
+          nodes: dueFlashcards,
+          accent: const Color(0xFFFADFD8),
+          actionLabel: 'Review',
+        ),
+        const SizedBox(height: 16),
+        _buildFlashcardSection(
+          title: 'Scheduled later',
+          subtitle: scheduledFlashcards.isEmpty
+              ? 'No future cards yet.'
+              : 'Flashcards with a future due date.',
+          emptyMessage:
+              'Mark more nodes as flashcards from the Knowledge tab to build a queue.',
+          nodes: scheduledFlashcards,
+          accent: const Color(0xFFDCECF7),
+          actionLabel: 'Open',
+          showDueDate: true,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReviewHero(int dueCount) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: <Color>[Color(0xFF18312D), Color(0xFF0E5E56)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            'Flashcards',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            dueCount == 0
+                ? 'Nothing is due right now. Use this tab to monitor upcoming reviews.'
+                : '$dueCount card${dueCount == 1 ? '' : 's'} due now. Review them without the knowledge tree competing for space.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyLarge?.copyWith(color: const Color(0xFFE5F2ED)),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.tonalIcon(
+            onPressed: dueCount == 0 ? null : _startReview,
+            icon: const Icon(Icons.play_arrow),
+            label: Text(dueCount == 0 ? 'No cards due' : 'Start review'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFlashcardSection({
+    required String title,
+    required String subtitle,
+    required String emptyMessage,
+    required List<KnowledgeNode> nodes,
+    required Color accent,
+    required String actionLabel,
+    bool showDueDate = false,
+  }) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFD9CDB7)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(title, style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF5C594F)),
+            ),
+            const SizedBox(height: 16),
+            if (nodes.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text(emptyMessage),
+              )
+            else
+              ...nodes.map(
+                (KnowledgeNode node) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _FlashcardListItem(
+                    node: node,
+                    accent: accent,
+                    showDueDate: showDueDate,
+                    actionLabel: actionLabel,
+                    onTap: () => _selectNodeFromFlashcards(node.id),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -341,6 +525,13 @@ class _KnowledgePageState extends State<KnowledgePage> {
               ),
       ),
     );
+  }
+
+  void _selectNodeFromFlashcards(String nodeId) {
+    setState(() {
+      _selectedNodeId = nodeId;
+      _tabController.index = 0;
+    });
   }
 
   Future<void> _openSettings() async {
@@ -985,6 +1176,22 @@ class _KnowledgePageState extends State<KnowledgePage> {
     return dueNodes;
   }
 
+  List<KnowledgeNode> _collectScheduledFlashcards(List<KnowledgeNode> nodes) {
+    final List<KnowledgeNode> scheduledNodes = <KnowledgeNode>[];
+    for (final KnowledgeNode node in nodes) {
+      if (node.isFlashcard && !node.isDue) {
+        scheduledNodes.add(node);
+      }
+      scheduledNodes.addAll(_collectScheduledFlashcards(node.children));
+    }
+    scheduledNodes.sort((KnowledgeNode a, KnowledgeNode b) {
+      final DateTime aDue = a.nextReviewAt ?? DateTime.now().toUtc();
+      final DateTime bDue = b.nextReviewAt ?? DateTime.now().toUtc();
+      return aDue.compareTo(bDue);
+    });
+    return scheduledNodes;
+  }
+
   void _showMessage(String message) {
     if (!mounted) {
       return;
@@ -1062,6 +1269,84 @@ class _MetricCard extends StatelessWidget {
             ).textTheme.headlineSmall?.copyWith(color: const Color(0xFF18312D)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FlashcardListItem extends StatelessWidget {
+  const _FlashcardListItem({
+    required this.node,
+    required this.accent,
+    required this.actionLabel,
+    required this.onTap,
+    this.showDueDate = false,
+  });
+
+  final KnowledgeNode node;
+  final Color accent;
+  final String actionLabel;
+  final VoidCallback onTap;
+  final bool showDueDate;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Ink(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: accent.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: accent),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    node.title.isEmpty ? 'Untitled node' : node.title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: const Color(0xFF18312D),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    node.body.isEmpty ? 'No answer yet.' : node.body,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFF4E4A3F),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      _Pill(
+                        label: 'Reviews ${node.reviewCount}',
+                        background: Colors.white.withValues(alpha: 0.8),
+                      ),
+                      if (showDueDate)
+                        _Pill(
+                          label: 'Due ${_formatDue(node.nextReviewAt)}',
+                          background: Colors.white.withValues(alpha: 0.8),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.tonal(onPressed: onTap, child: Text(actionLabel)),
+          ],
+        ),
       ),
     );
   }

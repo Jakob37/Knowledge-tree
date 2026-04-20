@@ -17,7 +17,8 @@ void main() {
     await tester.pumpWidget(const KnowledgeApp());
     await tester.pump(const Duration(milliseconds: 200));
 
-    expect(find.text('Knowledge'), findsOneWidget);
+    expect(find.text('Knowledge'), findsWidgets);
+    expect(find.text('Flashcards'), findsWidgets);
     expect(find.text('Tree'), findsOneWidget);
   });
 }
